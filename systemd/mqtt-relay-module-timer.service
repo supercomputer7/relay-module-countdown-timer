@@ -1,0 +1,20 @@
+[Unit]
+Description=MQTT Relay Module Countdown Timer
+
+After=network.target
+
+[Service]
+ExecStart=/opt/mqtt-relay-module-timer \
+          --mqtt-broker MQTT_IP_OR_HOSTNAME \
+          --mqtt-topic MQTT_TOPIC \
+          --mqtt-username MQTT_USER \
+          --mqtt-password MQTT_PASS \
+          --mqtt-port MQTT_PORT \
+          --gpio-chip GPIOCHIP_DEV \
+          --gpio-chip-line GPIOCHIP_LINE \
+          --default-added-seconds-duration DEFAULT_DURATION_ADDING_VALUE
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
