@@ -10,6 +10,8 @@ import (
 	rand "math/rand"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	gpiocdev "github.com/warthog618/go-gpiocdev"
+	overflow "github.com/JohnCGriffin/overflow"
+	i64 "github.com/adam-lavrik/go-imath/i64"
 )
 
 type CountdownTimer struct {
@@ -21,7 +23,7 @@ type CountdownTimer struct {
 var gCountdownTimer = CountdownTimer { sync.Mutex {}, 0, 2 * 60 * 60 }
 var gpiochipLine *gpiocdev.Line
 var gpioChipLineActiveHigh bool = true
-var defaultAddedSecondsDuration uint64 = 30 * 60
+var defaultAddedSecondsDuration int64 = 30 * 60
 
 
 func SetLatchOff() {
@@ -63,35 +65,50 @@ func countdown() {
 	}
 }
 
-func addMoreTime(seconds uint64) {
+func changeTime(seconds int64) {
 	gCountdownTimer.Lock()
-	secondsOfTimerBeforeAdding := gCountdownTimer.seconds
-	gCountdownTimer.seconds = gCountdownTimer.seconds + seconds
-	if (gCountdownTimer.maxSeconds <= gCountdownTimer.seconds) {
-		fmt.Printf("%s: Timer truncated to %d seconds\n", time.Now().Format(time.RFC850), gCountdownTimer.maxSeconds)
-		gCountdownTimer.seconds = gCountdownTimer.maxSeconds
+	defer gCountdownTimer.Unlock()
+	secondsOfTimerBeforeChanging := gCountdownTimer.seconds
+	if seconds < 0 {
+		secondsAbs := i64.Abs(seconds)
+		if uint64(secondsAbs) > gCountdownTimer.seconds {
+			gCountdownTimer.seconds = 0
+			SetLatchOff()
+		} else {
+			gCountdownTimer.seconds = uint64(int64(gCountdownTimer.seconds) - secondsAbs)
+		}
+		fmt.Printf("%s: Subtracted %d seconds so timer is now at %d, was at %d seconds\n", time.Now().Format(time.RFC850), secondsAbs, gCountdownTimer.seconds, secondsOfTimerBeforeChanging)
+	} else {
+		gCountdownTimer.seconds = uint64(int64(gCountdownTimer.seconds) + seconds)
+		if (gCountdownTimer.maxSeconds <= gCountdownTimer.seconds) {
+			fmt.Printf("%s: Timer truncated to %d seconds\n", time.Now().Format(time.RFC850), gCountdownTimer.maxSeconds)
+			gCountdownTimer.seconds = gCountdownTimer.maxSeconds
+		}
+		fmt.Printf("%s: Added %d seconds so timer is now at %d, was at %d seconds\n", time.Now().Format(time.RFC850), seconds, gCountdownTimer.seconds, secondsOfTimerBeforeChanging)
+		SetLatchOn()
 	}
-	fmt.Printf("%s: Added %d seconds so timer is now at %d, was at %d seconds\n", time.Now().Format(time.RFC850), seconds, gCountdownTimer.seconds, secondsOfTimerBeforeAdding)
-	SetLatchOn()
-	gCountdownTimer.Unlock()
 }
 
 var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 	// There are 2 valid inputs - empty message (zero bytes) or a textual ASCII numbers-only message
 	if len(msg.Payload()) == 0 {
 		fmt.Printf("%s: Received empty message from topic: %s\n", time.Now().Format(time.RFC850), msg.Topic())
-		addMoreTime(defaultAddedSecondsDuration)
+		changeTime(defaultAddedSecondsDuration)
 		return
 	}
 	
 	fmt.Printf("%s: Received message: %s from topic: %s\n", time.Now().Format(time.RFC850), msg.Payload(), msg.Topic())
 	// For "a textual ASCII numbers-only message" - we will try to parse it into a valid number, and if parsing was not
 	// succesful then we will simply ignore the message.
-	addedTimeInSeconds, err := strconv.ParseUint(string(msg.Payload()), 10, 64)
-    if err != nil || addedTimeInSeconds < 0 {
+	changedTimeInMinutes, err := strconv.ParseInt(string(msg.Payload()), 10, 64)
+    if err != nil {
 		return
     }
-	addMoreTime(addedTimeInSeconds)
+	changedTimeInSeconds, ok := overflow.Mul64(changedTimeInMinutes, 60)
+	if !ok {
+		return
+	}
+	changeTime(changedTimeInSeconds)
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
@@ -111,7 +128,7 @@ func main() {
 	gpioChipName := flag.String("gpio-chip", "gpiochip0", "GPIO Chip Name")
 	gpioChipLineNumber := flag.Int("gpio-chip-line", 1, "GPIO Chip Line for setting latch")
 	flag.BoolVar(&gpioChipLineActiveHigh, "active-high", false, "Latch is Active High triggered")
-	flag.Uint64Var(&defaultAddedSecondsDuration, "default-added-seconds-duration", 30 * 60, "Default Added Seconds Duration on empty MQTT message")
+	flag.Int64Var(&defaultAddedSecondsDuration, "default-added-seconds-duration", 30 * 60, "Default Added Seconds Duration on empty MQTT message")
     flag.Parse()
 
 	if (*port > uint64(65535)) {
@@ -120,6 +137,10 @@ func main() {
 
 	if (*gpioChipLineNumber < 0) {
 		panic("Invalid GPIO line number")
+	}
+
+	if (defaultAddedSecondsDuration < 0) {
+		panic("Invalid default added seconds duration")
 	}
 
 	// This is probably unsafe for anything serious, but since we use
