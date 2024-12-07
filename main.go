@@ -89,6 +89,23 @@ func changeTime(seconds int64) {
 	}
 }
 
+func periodicPublishAlerts(client mqtt.Client, topic *string) {
+	for {
+		time.Sleep(1 * time.Second)
+		gCountdownTimer.Lock()
+
+		t := client.Publish(*topic, 0, false, fmt.Sprintf("%d\n", gCountdownTimer.seconds))
+		go func() {
+			_ = t.Wait()
+			if t.Error() != nil {
+				fmt.Printf("%s: %s\n", time.Now().Format(time.RFC850), t.Error())
+			}
+		}()
+		gCountdownTimer.Unlock()
+	}
+}
+
+
 var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 	// There are 2 valid inputs - empty message (zero bytes) or a textual ASCII numbers-only message
 	if len(msg.Payload()) == 0 {
@@ -123,6 +140,7 @@ func main() {
 	broker := flag.String("mqtt-broker", "127.0.0.1", "MQTT Broker hostname/IP")
 	port := flag.Uint64("mqtt-port", 1883, "MQTT Broker Port")
 	topic := flag.String("mqtt-topic", "test-topic", "MQTT Topic to subscribe")
+	alertTopic := flag.String("mqtt-alert-topic", "test-alert-topic", "MQTT Topic to send alerts")
 	username := flag.String("mqtt-username", "", "MQTT Broker username")
 	password := flag.String("mqtt-password", "", "MQTT Broker password")
 	gpioChipName := flag.String("gpio-chip", "gpiochip0", "GPIO Chip Name")
@@ -180,5 +198,6 @@ func main() {
 	gpiochipLine = line
 
 	go countdown()
+	go periodicPublishAlerts(client, alertTopic)
 	select {} // block forever
 }
