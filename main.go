@@ -174,6 +174,10 @@ func main() {
     opts.SetUsername(*username)
     opts.SetPassword(*password)
     opts.SetDefaultPublishHandler(messagePubHandler)
+	opts.SetPingTimeout(10 * time.Second)
+	opts.SetKeepAlive(10 * time.Second)
+	opts.SetAutoReconnect(true)
+	opts.SetMaxReconnectInterval(10 * time.Second)
     opts.OnConnect = connectHandler
     opts.OnConnectionLost = connectLostHandler
     client := mqtt.NewClient(opts)
