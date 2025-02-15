@@ -133,7 +133,9 @@ var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
 }
 
 var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
-    fmt.Printf("%s: Connection lost from MQTT broker: %v\n", time.Now().Format(time.RFC850), err)
+    fmt.Printf("%s: Connection lost from MQTT broker: %v\n, aborting!", time.Now().Format(time.RFC850), err)
+	SetLatchOff()
+	panic("Connection lost from MQTT broker")
 }
 
 func main() {
