@@ -9,7 +9,6 @@ import (
 
 	rand "math/rand"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	gpiocdev "github.com/warthog618/go-gpiocdev"
 	overflow "github.com/JohnCGriffin/overflow"
 	i64 "github.com/adam-lavrik/go-imath/i64"
 )
@@ -21,25 +20,30 @@ type CountdownTimer struct {
 }
 
 var gCountdownTimer = CountdownTimer { sync.Mutex {}, 0, 2 * 60 * 60 }
-var gpiochipLine *gpiocdev.Line
-var gpioChipLineActiveHigh bool = true
+var timeTopic *string
+var cmdTopic *string
+var mqttClient mqtt.Client
 var defaultAddedSecondsDuration int64 = 30 * 60
 
 
 func SetLatchOff() {
-	if gpioChipLineActiveHigh {
-		gpiochipLine.SetValue(0)
-	} else {
-		gpiochipLine.SetValue(1)
-	}
+	t := mqttClient.Publish(*cmdTopic, 0, false, "OFF")
+	go func() {
+		_ = t.Wait()
+		if t.Error() != nil {
+			fmt.Printf("%s: %s\n", time.Now().Format(time.RFC850), t.Error())
+		}
+	}()
 }
 
 func SetLatchOn() {
-	if gpioChipLineActiveHigh {
-		gpiochipLine.SetValue(1)
-	} else {
-		gpiochipLine.SetValue(0)
-	}
+	t := mqttClient.Publish(*cmdTopic, 0, false, "ON")
+	go func() {
+		_ = t.Wait()
+		if t.Error() != nil {
+			fmt.Printf("%s: %s\n", time.Now().Format(time.RFC850), t.Error())
+		}
+	}()
 }
 
 func decreaseOneSecond() {
@@ -89,23 +93,6 @@ func changeTime(seconds int64) {
 	}
 }
 
-func periodicPublishAlerts(client mqtt.Client, topic *string) {
-	for {
-		time.Sleep(1 * time.Second)
-		gCountdownTimer.Lock()
-
-		t := client.Publish(*topic, 0, false, fmt.Sprintf("%d\n", gCountdownTimer.seconds))
-		go func() {
-			_ = t.Wait()
-			if t.Error() != nil {
-				fmt.Printf("%s: %s\n", time.Now().Format(time.RFC850), t.Error())
-			}
-		}()
-		gCountdownTimer.Unlock()
-	}
-}
-
-
 var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 	// There are 2 valid inputs - empty message (zero bytes) or a textual ASCII numbers-only message
 	if len(msg.Payload()) == 0 {
@@ -141,22 +128,15 @@ var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err
 func main() {
 	broker := flag.String("mqtt-broker", "127.0.0.1", "MQTT Broker hostname/IP")
 	port := flag.Uint64("mqtt-port", 1883, "MQTT Broker Port")
-	topic := flag.String("mqtt-topic", "test-topic", "MQTT Topic to subscribe")
-	alertTopic := flag.String("mqtt-alert-topic", "test-alert-topic", "MQTT Topic to send alerts")
+	timeTopic = flag.String("mqtt-duration-topic", "test-topic", "MQTT Topic to subscribe for receiving start/add durations")
+	cmdTopic = flag.String("mqtt-switch-cmd-topic", "test-cmd-topic", "MQTT Topic to send ON/OFF switch commandss")
 	username := flag.String("mqtt-username", "", "MQTT Broker username")
 	password := flag.String("mqtt-password", "", "MQTT Broker password")
-	gpioChipName := flag.String("gpio-chip", "gpiochip0", "GPIO Chip Name")
-	gpioChipLineNumber := flag.Int("gpio-chip-line", 1, "GPIO Chip Line for setting latch")
-	flag.BoolVar(&gpioChipLineActiveHigh, "active-high", false, "Latch is Active High triggered")
 	flag.Int64Var(&defaultAddedSecondsDuration, "default-added-seconds-duration", 30 * 60, "Default Added Seconds Duration on empty MQTT message")
     flag.Parse()
 
 	if (*port > uint64(65535)) {
 		panic("Invalid port number")
-	}
-
-	if (*gpioChipLineNumber < 0) {
-		panic("Invalid GPIO line number")
 	}
 
 	if (defaultAddedSecondsDuration < 0) {
@@ -182,28 +162,20 @@ func main() {
 	opts.SetMaxReconnectInterval(10 * time.Second)
     opts.OnConnect = connectHandler
     opts.OnConnectionLost = connectLostHandler
-    client := mqtt.NewClient(opts)
-    if token := client.Connect(); !token.WaitTimeout(10 * time.Second) || token.Error() != nil {
+    mqttClient = mqtt.NewClient(opts)
+    if token := mqttClient.Connect(); !token.WaitTimeout(10 * time.Second) || token.Error() != nil {
 		if token.Error() != nil {
 			panic(token.Error())
 		}
         panic("Timeout when initialzing a connection to MQTT broker!\n")
   	}
 
-	token := client.Subscribe(*topic, 1, nil)
+	token := mqttClient.Subscribe(*timeTopic, 1, nil)
 	if !token.WaitTimeout(10 * time.Second) {
 		panic("Timeout when subscribing to topic!\n")
 	}
-	fmt.Printf("%s: Subscribed to topic %s\n", time.Now().Format(time.RFC850), *topic)
-
-	line, err := gpiocdev.RequestLine(*gpioChipName, *gpioChipLineNumber, gpiocdev.AsOutput(1))
-	if err != nil {
-		panic(err)
-	}
-
-	gpiochipLine = line
+	fmt.Printf("%s: Subscribed to topic %s\n", time.Now().Format(time.RFC850), *timeTopic)
 
 	go countdown()
-	go periodicPublishAlerts(client, alertTopic)
 	select {} // block forever
 }
