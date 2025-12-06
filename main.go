@@ -6,6 +6,8 @@ import (
 	"time"
     "strconv"
 	"flag"
+	"net/http"
+	"log"
 
 	rand "math/rand"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -93,6 +95,18 @@ func changeTime(seconds int64) {
 	}
 }
 
+func handlePayload(msg string) {
+	changedTimeInMinutes, err := strconv.ParseInt(msg, 10, 64)
+    if err != nil {
+		return
+    }
+	changedTimeInSeconds, ok := overflow.Mul64(changedTimeInMinutes, 60)
+	if !ok {
+		return
+	}
+	changeTime(changedTimeInSeconds)
+}
+
 var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 	// There are 2 valid inputs - empty message (zero bytes) or a textual ASCII numbers-only message
 	if len(msg.Payload()) == 0 {
@@ -104,15 +118,7 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 	fmt.Printf("%s: Received message: %s from topic: %s\n", time.Now().Format(time.RFC850), msg.Payload(), msg.Topic())
 	// For "a textual ASCII numbers-only message" - we will try to parse it into a valid number, and if parsing was not
 	// succesful then we will simply ignore the message.
-	changedTimeInMinutes, err := strconv.ParseInt(string(msg.Payload()), 10, 64)
-    if err != nil {
-		return
-    }
-	changedTimeInSeconds, ok := overflow.Mul64(changedTimeInMinutes, 60)
-	if !ok {
-		return
-	}
-	changeTime(changedTimeInSeconds)
+	handlePayload(string(msg.Payload()))
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
@@ -125,9 +131,84 @@ var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err
 	panic("Connection lost from MQTT broker")
 }
 
+func servePage(w http.ResponseWriter, r *http.Request) {
+    html := `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IoT Push button control</title>
+<style>
+    body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
+    h1 { margin-top: 50px; }
+    .buttons { width: 90%; max-width: 400px; margin: 50px auto; }
+    button {
+        display: block;
+        width: 100%;
+        padding: 25px 0;
+        font-size: 1.8rem;
+        margin-bottom: 20px;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        background-color: #ccc;
+    }
+    button:active { background-color: #aaa; }
+</style>
+</head>
+<body>
+<h1>IoT control buttons</h1>
+<div class="buttons">
+    <button id="btn1">Add 30 minutes</button>
+    <button id="btn2">Power off now</button>
+</div>
+
+<script>
+var btn1 = document.getElementById('btn1');
+var btn2 = document.getElementById('btn2');
+
+btn1.onclick = function() { sendMessage('30', btn1); };
+btn2.onclick = function() { sendMessage('-1800', btn2); };
+
+function sendMessage(msg, button) {
+    button.disabled = true;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/send?msg=' + encodeURIComponent(msg), true);
+    xhr.onreadystatechange = function() {
+        if(xhr.readyState === 4) {
+            console.log(xhr.responseText);
+            setTimeout(function() { button.disabled = false; }, 300);
+        }
+    };
+    xhr.send();
+}
+</script>
+</body>
+</html>
+`
+    w.Header().Set("Content-Type", "text/html")
+    fmt.Fprint(w, html)
+}
+
+func handleSend(w http.ResponseWriter, r *http.Request) {
+    msg := r.URL.Query().Get("msg")
+    if msg == "" {
+        w.WriteHeader(http.StatusBadRequest)
+        fmt.Fprint(w, "Missing msg parameter")
+        return
+    }
+
+	// this is not the best practice but we need to make sure the relay is not switched on and off rapidly
+	time.Sleep(500 * time.Millisecond)
+	handlePayload(msg)
+	fmt.Fprintf(w, "Message sent: %s", msg)
+}
+
 func main() {
 	broker := flag.String("mqtt-broker", "127.0.0.1", "MQTT Broker hostname/IP")
 	port := flag.Uint64("mqtt-port", 1883, "MQTT Broker Port")
+	httpPort := flag.Uint64("http-port", 8080, "HTTP Port")
 	timeTopic = flag.String("mqtt-duration-topic", "test-topic", "MQTT Topic to subscribe for receiving start/add durations")
 	cmdTopic = flag.String("mqtt-switch-cmd-topic", "test-cmd-topic", "MQTT Topic to send ON/OFF switch commandss")
 	username := flag.String("mqtt-username", "", "MQTT Broker username")
@@ -177,5 +258,18 @@ func main() {
 	fmt.Printf("%s: Subscribed to topic %s\n", time.Now().Format(time.RFC850), *timeTopic)
 
 	go countdown()
+
+	// Serve HTML page
+    http.HandleFunc("/", servePage)
+    // Handle button presses
+    http.HandleFunc("/send", handleSend)
+
+    go func() {
+		fmt.Printf("Starting HTTP server at :%d\n", *httpPort)
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", *httpPort), nil); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
 	select {} // block forever
 }
