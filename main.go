@@ -210,7 +210,7 @@ func main() {
 	port := flag.Uint64("mqtt-port", 1883, "MQTT Broker Port")
 	httpPort := flag.Uint64("http-port", 8080, "HTTP Port")
 	timeTopic = flag.String("mqtt-duration-topic", "test-topic", "MQTT Topic to subscribe for receiving start/add durations")
-	cmdTopic = flag.String("mqtt-switch-cmd-topic", "test-cmd-topic", "MQTT Topic to send ON/OFF switch commandss")
+	cmdTopic = flag.String("mqtt-switch-cmd-topic", "test-cmd-topic", "MQTT Topic to send ON/OFF switch commands")
 	username := flag.String("mqtt-username", "", "MQTT Broker username")
 	password := flag.String("mqtt-password", "", "MQTT Broker password")
 	flag.Int64Var(&defaultAddedSecondsDuration, "default-added-seconds-duration", 30 * 60, "Default Added Seconds Duration on empty MQTT message")
