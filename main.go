@@ -24,12 +24,14 @@ type CountdownTimer struct {
 var gCountdownTimer = CountdownTimer { sync.Mutex {}, 0, 2 * 60 * 60 }
 var timeTopic *string
 var cmdTopic *string
+var mqttCmdOn *string
+var mqttCmdOff *string
 var mqttClient mqtt.Client
 var defaultAddedSecondsDuration int64 = 30 * 60
 
 
 func SetLatchOff() {
-	t := mqttClient.Publish(*cmdTopic, 0, false, "OFF")
+	t := mqttClient.Publish(*cmdTopic, 0, false, *mqttCmdOff)
 	go func() {
 		_ = t.Wait()
 		if t.Error() != nil {
@@ -39,7 +41,7 @@ func SetLatchOff() {
 }
 
 func SetLatchOn() {
-	t := mqttClient.Publish(*cmdTopic, 0, false, "ON")
+	t := mqttClient.Publish(*cmdTopic, 0, false, *mqttCmdOn)
 	go func() {
 		_ = t.Wait()
 		if t.Error() != nil {
@@ -211,6 +213,8 @@ func main() {
 	httpPort := flag.Uint64("http-port", 8080, "HTTP Port")
 	timeTopic = flag.String("mqtt-duration-topic", "test-topic", "MQTT Topic to subscribe for receiving start/add durations")
 	cmdTopic = flag.String("mqtt-switch-cmd-topic", "test-cmd-topic", "MQTT Topic to send ON/OFF switch commands")
+	cmdOn := flag.String("mqtt-switch-on-cmd", "ON", "MQTT string for ON switch command")
+	cmdOff := flag.String("mqtt-switch-off-cmd", "OFF", "MQTT string for OFF switch command")
 	username := flag.String("mqtt-username", "", "MQTT Broker username")
 	password := flag.String("mqtt-password", "", "MQTT Broker password")
 	flag.Int64Var(&defaultAddedSecondsDuration, "default-added-seconds-duration", 30 * 60, "Default Added Seconds Duration on empty MQTT message")
@@ -230,6 +234,9 @@ func main() {
 
 	clientId := fmt.Sprintf("mqtt-relay-module-timer-%d", rand.Int())
 	fmt.Printf("Connecting to %s:%d, with client id of %s\n", *broker, *port, clientId)
+
+	mqttCmdOn = cmdOn
+	mqttCmdOff = cmdOff
 
     opts := mqtt.NewClientOptions()
     opts.AddBroker(fmt.Sprintf("tcp://%s:%d", *broker, *port))
