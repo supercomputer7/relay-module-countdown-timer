@@ -1,34 +1,33 @@
 package main
 
 import (
-	"sync"
-    "fmt"
-	"time"
-    "strconv"
 	"flag"
-	"net/http"
+	"fmt"
 	"log"
+	"net/http"
+	"strconv"
+	"sync"
+	"time"
 
-	rand "math/rand"
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	overflow "github.com/JohnCGriffin/overflow"
 	i64 "github.com/adam-lavrik/go-imath/i64"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
+	rand "math/rand"
 )
 
 type CountdownTimer struct {
 	sync.Mutex
-	seconds uint64
+	seconds    uint64
 	maxSeconds uint64
 }
 
-var gCountdownTimer = CountdownTimer { sync.Mutex {}, 0, 2 * 60 * 60 }
+var gCountdownTimer = CountdownTimer{sync.Mutex{}, 0, 2 * 60 * 60}
 var timeTopic *string
 var cmdTopic *string
 var mqttCmdOn *string
 var mqttCmdOff *string
 var mqttClient mqtt.Client
 var defaultAddedSecondsDuration int64 = 30 * 60
-
 
 func SetLatchOff() {
 	t := mqttClient.Publish(*cmdTopic, 0, false, *mqttCmdOff)
@@ -52,14 +51,14 @@ func SetLatchOn() {
 
 func decreaseOneSecond() {
 	defer gCountdownTimer.Unlock()
-	
+
 	gCountdownTimer.Lock()
 	if gCountdownTimer.seconds == 0 {
 		return
 	}
-	
+
 	gCountdownTimer.seconds = gCountdownTimer.seconds - 1
-	if (gCountdownTimer.seconds == 0) {
+	if gCountdownTimer.seconds == 0 {
 		fmt.Printf("%s: Timer now at 0, will shut off latch\n", time.Now().Format(time.RFC850))
 		SetLatchOff()
 	}
@@ -88,7 +87,7 @@ func changeTime(seconds int64) {
 		fmt.Printf("%s: Subtracted %d seconds so timer is now at %d, was at %d seconds\n", time.Now().Format(time.RFC850), secondsAbs, gCountdownTimer.seconds, secondsOfTimerBeforeChanging)
 	} else {
 		gCountdownTimer.seconds = uint64(int64(gCountdownTimer.seconds) + seconds)
-		if (gCountdownTimer.maxSeconds <= gCountdownTimer.seconds) {
+		if gCountdownTimer.maxSeconds <= gCountdownTimer.seconds {
 			fmt.Printf("%s: Timer truncated to %d seconds\n", time.Now().Format(time.RFC850), gCountdownTimer.maxSeconds)
 			gCountdownTimer.seconds = gCountdownTimer.maxSeconds
 		}
@@ -99,9 +98,9 @@ func changeTime(seconds int64) {
 
 func handlePayload(msg string) {
 	changedTimeInMinutes, err := strconv.ParseInt(msg, 10, 64)
-    if err != nil {
+	if err != nil {
 		return
-    }
+	}
 	changedTimeInSeconds, ok := overflow.Mul64(changedTimeInMinutes, 60)
 	if !ok {
 		return
@@ -116,7 +115,7 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 		changeTime(defaultAddedSecondsDuration)
 		return
 	}
-	
+
 	fmt.Printf("%s: Received message: %s from topic: %s\n", time.Now().Format(time.RFC850), msg.Payload(), msg.Topic())
 	// For "a textual ASCII numbers-only message" - we will try to parse it into a valid number, and if parsing was not
 	// succesful then we will simply ignore the message.
@@ -124,17 +123,17 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
-    fmt.Printf("%s: Connected to MQTT broker\n", time.Now().Format(time.RFC850))
+	fmt.Printf("%s: Connected to MQTT broker\n", time.Now().Format(time.RFC850))
 }
 
 var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
-    fmt.Printf("%s: Connection lost from MQTT broker: %v\n, aborting!", time.Now().Format(time.RFC850), err)
+	fmt.Printf("%s: Connection lost from MQTT broker: %v\n, aborting!", time.Now().Format(time.RFC850), err)
 	SetLatchOff()
 	panic("Connection lost from MQTT broker")
 }
 
 func servePage(w http.ResponseWriter, r *http.Request) {
-    html := `
+	html := `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -189,17 +188,17 @@ function sendMessage(msg, button) {
 </body>
 </html>
 `
-    w.Header().Set("Content-Type", "text/html")
-    fmt.Fprint(w, html)
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprint(w, html)
 }
 
 func handleSend(w http.ResponseWriter, r *http.Request) {
-    msg := r.URL.Query().Get("msg")
-    if msg == "" {
-        w.WriteHeader(http.StatusBadRequest)
-        fmt.Fprint(w, "Missing msg parameter")
-        return
-    }
+	msg := r.URL.Query().Get("msg")
+	if msg == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, "Missing msg parameter")
+		return
+	}
 
 	// this is not the best practice but we need to make sure the relay is not switched on and off rapidly
 	time.Sleep(500 * time.Millisecond)
@@ -217,14 +216,14 @@ func main() {
 	cmdOff := flag.String("mqtt-switch-off-cmd", "OFF", "MQTT string for OFF switch command")
 	username := flag.String("mqtt-username", "", "MQTT Broker username")
 	password := flag.String("mqtt-password", "", "MQTT Broker password")
-	flag.Int64Var(&defaultAddedSecondsDuration, "default-added-seconds-duration", 30 * 60, "Default Added Seconds Duration on empty MQTT message")
-    flag.Parse()
+	flag.Int64Var(&defaultAddedSecondsDuration, "default-added-seconds-duration", 30*60, "Default Added Seconds Duration on empty MQTT message")
+	flag.Parse()
 
-	if (*port > uint64(65535)) {
+	if *port > uint64(65535) {
 		panic("Invalid port number")
 	}
 
-	if (defaultAddedSecondsDuration < 0) {
+	if defaultAddedSecondsDuration < 0 {
 		panic("Invalid default added seconds duration")
 	}
 
@@ -238,25 +237,25 @@ func main() {
 	mqttCmdOn = cmdOn
 	mqttCmdOff = cmdOff
 
-    opts := mqtt.NewClientOptions()
-    opts.AddBroker(fmt.Sprintf("tcp://%s:%d", *broker, *port))
-    opts.SetClientID(clientId)
-    opts.SetUsername(*username)
-    opts.SetPassword(*password)
-    opts.SetDefaultPublishHandler(messagePubHandler)
+	opts := mqtt.NewClientOptions()
+	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", *broker, *port))
+	opts.SetClientID(clientId)
+	opts.SetUsername(*username)
+	opts.SetPassword(*password)
+	opts.SetDefaultPublishHandler(messagePubHandler)
 	opts.SetPingTimeout(10 * time.Second)
 	opts.SetKeepAlive(10 * time.Second)
 	opts.SetAutoReconnect(true)
 	opts.SetMaxReconnectInterval(10 * time.Second)
-    opts.OnConnect = connectHandler
-    opts.OnConnectionLost = connectLostHandler
-    mqttClient = mqtt.NewClient(opts)
-    if token := mqttClient.Connect(); !token.WaitTimeout(10 * time.Second) || token.Error() != nil {
+	opts.OnConnect = connectHandler
+	opts.OnConnectionLost = connectLostHandler
+	mqttClient = mqtt.NewClient(opts)
+	if token := mqttClient.Connect(); !token.WaitTimeout(10*time.Second) || token.Error() != nil {
 		if token.Error() != nil {
 			panic(token.Error())
 		}
-        panic("Timeout when initialzing a connection to MQTT broker!\n")
-  	}
+		panic("Timeout when initialzing a connection to MQTT broker!\n")
+	}
 
 	token := mqttClient.Subscribe(*timeTopic, 1, nil)
 	if !token.WaitTimeout(10 * time.Second) {
@@ -267,11 +266,11 @@ func main() {
 	go countdown()
 
 	// Serve HTML page
-    http.HandleFunc("/", servePage)
-    // Handle button presses
-    http.HandleFunc("/send", handleSend)
+	http.HandleFunc("/", servePage)
+	// Handle button presses
+	http.HandleFunc("/send", handleSend)
 
-    go func() {
+	go func() {
 		fmt.Printf("Starting HTTP server at :%d\n", *httpPort)
 		if err := http.ListenAndServe(fmt.Sprintf(":%d", *httpPort), nil); err != nil {
 			log.Fatal(err)
